@@ -1,21 +1,29 @@
 import sys
 from enum import IntEnum
-
 import numpy as np
-
+from simpleai.search import SearchProblem
 
 class Spot(IntEnum):
-    PEG, FREE, OUT_OF_BOUNDS = range(3)
+    PEG, FREE, GAP, OUT_OF_BOUNDS = range(4)
 
+SYMBOL_MAP = {
+    Spot.PEG: '*',
+    Spot.FREE: 'o',
+    Spot.GAP: '.',
+    Spot.OUT_OF_BOUNDS: ' '
+}
 
-class Board:
+class Board(SearchProblem):
     def __init__(self, board, directions):
         self.board = board
-        self.size = board.shape[0]
+        self.initial_state = (board.tobytes(), board.shape, directions)
+        self.size = board.shape
 
         if type(directions) is str:
             if directions == 'all':
                 self.directions = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
+            elif directions == 'diagonal':
+                self.directions = ['ne', 'e', 'se', 'sw', 'w', 'nw']
             elif directions == 'ortho':
                 self.directions = ['n', 'e', 's', 'w']
             elif directions == 'swne':
@@ -43,51 +51,78 @@ class Board:
                     board_matrix[r, c] = int(Spot.PEG)
                 elif matrix[r, c] == 'o':
                     board_matrix[r, c] = int(Spot.FREE)
-                else:
-                    board_matrix[r, c] = int(Spot.OUT_OF_BOUNDS)
+                elif matrix[r, c] == '.':
+                    board_matrix[r, c] = int(Spot.GAP)
 
         return Board(board=board_matrix, directions=directions.strip())
+
+    @classmethod
+    def board_from_state(cls, state):
+        board_matrix = np.fromstring(state[0], np.uint8).reshape(state[1])
+        return Board(board_matrix, state[2])
 
     @classmethod
     def board_from_board(cls, other):
         new_board = Board(np.copy(other.board), other.directions)
         return new_board
 
-    def get_symmetrically_equivalent_boards(self):
-        return [Board(np.rot90(np.copy(self.board), i), self.directions) for i in range(1, 4)]
-
-    def successors(self):
-        moves = self.get_possible_moves()
-        for move in moves:
-            yield (move, self.make_move(*move))
-
     def check_peg(self, start_position, direction):
+        initial_direction = direction
+        while self.check_gap(start_position, direction):
+            direction += initial_direction
+            if self._get_spot(start_position, direction) == Spot.OUT_OF_BOUNDS: return False
         return self._get_spot(start_position, direction) == Spot.PEG
 
     def check_free(self, start_position, direction):
+        initial_direction = direction
+        while self.check_gap(start_position, direction):
+            direction += initial_direction
+            if self._get_spot(start_position, direction) == Spot.OUT_OF_BOUNDS: return False
         return self._get_spot(start_position, direction) == Spot.FREE
 
-    def is_goal(self):
+    def check_gap(self, start_position, direction):
+        return self._get_spot(start_position, direction) == Spot.GAP
+
+    def is_goal(self, state):
         """
         Checks if the current board is in a goal state (IE there is only one pin left)
         :return: board_is_goal_state
         """
         pegs = 0
+        board = Board.board_from_state(state)
 
-        for r in range(self.size):
-            for c in range(self.size):
-                if self.board[r, c] == Spot.PEG:
+        for r in range(board.size[0]):
+            for c in range(board.size[1]):
+                if board.board[r, c] == Spot.PEG:
                     pegs += 1
 
                 if pegs > 1:
                     return False
         return pegs == 1
 
+    """
+    :param state: the current state of the board
+    :return: The list of possible actions
+    """
+    def actions(self, state):
+        board = Board.board_from_state(state)
+        return board.get_possible_moves()
+
+    """
+    :param state: the current state of the board
+    :param action: The action to be taken (in this case, a particular move)
+    :return: the new state of the board after taking said action
+    """
+    def result(self, state, action):
+        # The result of an action is the new board after a particular move
+        board = Board.board_from_state(state)
+        new_board = board.make_move(action[0], action[1])
+        return (new_board.board.tobytes(), new_board.size, 'diagonal')
+
     def peg_count(self):
         pegs = 0
-
-        for r in range(self.size):
-            for c in range(self.size):
+        for r in range(self.size[0]):
+            for c in range(self.size[1]):
                 if self.board[r, c] == Spot.PEG:
                     pegs += 1
 
@@ -96,8 +131,8 @@ class Board:
     def free_count(self):
         free = 0
 
-        for r in range(self.size):
-            for c in range(self.size):
+        for r in range(self.size[0]):
+            for c in range(self.size[1]):
                 if self.board[r, c] == Spot.FREE:
                     free += 1
 
@@ -106,6 +141,12 @@ class Board:
     def get_possible_moves(self):
         """
         :returns: a list of lists of tuples of tuples of possible moves from source > destination
+        [
+            [
+                (from_x, from_y),
+                (to_x, to_y)
+            ]
+        ]
         """
         for free_position in self._free_positions():
             yield from [(jump, free_position) for jump in self._possible_jumps_into_empty(free_position)]
@@ -114,7 +155,6 @@ class Board:
         """
         :param source: The coordinate of the pin that you'd like to move
         :param destination: The coordinate of the empty position that you'd like to move the pin into
-        :param apply: If you'd like to apply the move to the current board and change its matrix accordingly
         :return: new_board: a new board with the move applied
         """
         new_board = Board.board_from_board(self)
@@ -137,7 +177,7 @@ class Board:
         """
         r, c = start_position
 
-        r -= direction.count('n')
+        r -= direction.count('n') # Since row index (r) is increasing as you go down, subtract the index to go up
         r += direction.count('s')
         c += direction.count('e')
         c -= direction.count('w')
@@ -149,7 +189,6 @@ class Board:
         Given the coordinate of an empty space, will return the locations of all the pegs that could jump into that cell
         :param empty_coord: the coordinate of the empty spot that you'd like to check from
         """
-
         for direction in self.directions:
             if self.check_peg(empty_coord, direction) and self.check_peg(empty_coord, direction * 2):
                 yield self._adjusts_coords_to_direction(empty_coord, direction * 2)
@@ -159,8 +198,8 @@ class Board:
         Looks through the matrix and returns a list of empty spaces.
         :returns a list of (r, c) coordinates where blank spots can be found on the board.
         """
-        for r in range(self.size):
-            for c in range(self.size):
+        for r in range(self.size[0]):
+            for c in range(self.size[1]):
                 if self.board[r, c] == Spot.FREE:
                     yield (r, c)
 
@@ -173,7 +212,7 @@ class Board:
 
         r, c = self._adjusts_coords_to_direction(start_position, direction)
         if self._out_of_bounds(r, c):
-            return '.'
+            return Spot.OUT_OF_BOUNDS
 
         return self.board[r, c]
 
@@ -181,59 +220,22 @@ class Board:
         """
         Checks to see if a given r, c is out of bounds
         """
-        return min(r, c) < 0 or max(r, c) >= self.size
+        return (r < 0 or r >= self.size[0]) or (c < 0 or c >= self.size[1])
 
     def __eq__(self, other):
         return (self.board == other.board).all()
 
     def __str__(self):
         ret = '  '
-        for i in range(self.size):
+        for i in range(self.size[1]):
             ret += str(i) + ' '
         ret += '\n'
 
-        for r in range(self.size):
+        for r in range(self.size[0]):
             ret += str(r) + ' '
-            for c in range(self.size):
-                ret += '{} '.format(self.board[r, c])
+            for c in range(self.size[1]):
+                ret += '{} '.format(SYMBOL_MAP[self.board[r, c]])
             ret += '\n'
         return ret
 
 
-def main():
-    board = Board.board_from_file(sys.argv[1])
-
-    # Game loop
-    while not board.is_goal():
-        moves = [move for move in board.get_possible_moves()]
-
-        print('\n{}'.format(board))
-
-        # Print out a list of all possible moves
-        if len(moves) == 0:
-            print('You lost! Sorry')
-            return 0
-
-        for move_num, move in enumerate(moves):
-            source, destination = move
-            print('{}:\t{} --> {}'.format(move_num, source, destination))
-
-        # Get input from the user as to which move to take next
-        user_input = None
-        while user_input is None:
-            prompt = input("Please select a move (or 'q' to quit): ")
-
-            if prompt == 'q':
-                return 0
-            if int(prompt) in range(len(moves)):
-                user_input = int(prompt)
-                break
-
-        board = board.make_move(*moves[user_input])
-
-    print('\nCongratulations! You won!')
-    print(board)
-
-
-if __name__ == '__main__':
-    main()
