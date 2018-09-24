@@ -2,16 +2,15 @@ import sys
 import time
 
 from board import Board
-from priority_queue import PriorityQueue
 import heuristic as heuristics
 
-from simpleai.search.traditional import (
+from simpleai.search import (
     astar,
     breadth_first,
     depth_first,
     iterative_limited_depth_first
 )
-from simpleai.search.viewers import ConsoleViewer
+from simpleai.search.viewers import WebViewer
 
  
 
@@ -39,15 +38,15 @@ def main():
 
     start = time.time()
     if method == 'dfs':
-        result = depth_first(start_board, check_duplicates, ConsoleViewer())
+        result = depth_first(start_board, check_duplicates)
     elif method == 'bfs':
-        result = breadth_first(start_board, check_duplicates, ConsoleViewer())
+        result = breadth_first(start_board, check_duplicates)
 
     elif method == 'astar':
-        result = astar(start_board, check_duplicates, ConsoleViewer())
+        result = astar(start_board, check_duplicates)
 
     elif method == 'ildf':
-        result = iterative_limited_depth_first(start_board, check_duplicates, ConsoleViewer())
+        result = iterative_limited_depth_first(start_board, check_duplicates)
 
     else:
         print('You must choose a valid search method. Exiting...')
@@ -61,13 +60,10 @@ def main():
     if result:
         path = result.path()
         for step in path:
-            print(step[0], '-->', step[1])
+            print(step[0], '-->', Board.board_from_state(step[1]))
         print('Duration: {0:.4f} seconds'.format(end - start))
-        print('Nodes Visited:', path.nodes_visited)
-        print('Space: {} nodes'.format(path.space))
+        print('Nodes Visited:', len(path))
 
-        if hasattr(path, 'visited') and ('graph' in duplication_checks or 'symmetry' in duplication_checks):
-            print('Visited Size:', len(path.visited))
     else:
         print("No solution found!")
 

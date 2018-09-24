@@ -16,7 +16,6 @@ SYMBOL_MAP = {
 class Board(SearchProblem):
     def __init__(self, board, directions):
         self.board = board
-        self.initial_state = (board.tobytes(), board.shape, directions)
         self.size = board.shape
 
         if type(directions) is str:
@@ -30,6 +29,7 @@ class Board(SearchProblem):
                 self.directions = ['n', 'ne', 'e', 's', 'sw', 'w']
         else:
             self.directions = directions
+        super(Board, self).__init__(initial_state=(board.tobytes(), board.shape, directions))
 
     @classmethod
     def board_from_file(cls, file_name):
@@ -53,8 +53,9 @@ class Board(SearchProblem):
                     board_matrix[r, c] = int(Spot.FREE)
                 elif matrix[r, c] == '.':
                     board_matrix[r, c] = int(Spot.GAP)
-
-        return Board(board=board_matrix, directions=directions.strip())
+        board = Board(board=board_matrix, directions=directions.strip())
+        # print(board)
+        return board
 
     @classmethod
     def board_from_state(cls, state):
@@ -67,21 +68,10 @@ class Board(SearchProblem):
         return new_board
 
     def check_peg(self, start_position, direction):
-        initial_direction = direction
-        while self.check_gap(start_position, direction):
-            direction += initial_direction
-            if self._get_spot(start_position, direction) == Spot.OUT_OF_BOUNDS: return False
         return self._get_spot(start_position, direction) == Spot.PEG
 
     def check_free(self, start_position, direction):
-        initial_direction = direction
-        while self.check_gap(start_position, direction):
-            direction += initial_direction
-            if self._get_spot(start_position, direction) == Spot.OUT_OF_BOUNDS: return False
         return self._get_spot(start_position, direction) == Spot.FREE
-
-    def check_gap(self, start_position, direction):
-        return self._get_spot(start_position, direction) == Spot.GAP
 
     def is_goal(self, state):
         """
@@ -116,7 +106,9 @@ class Board(SearchProblem):
     def result(self, state, action):
         # The result of an action is the new board after a particular move
         board = Board.board_from_state(state)
+        # print(str(action[0]) + '->' + str(action[1]))
         new_board = board.make_move(action[0], action[1])
+        # print(new_board)
         return (new_board.board.tobytes(), new_board.size, 'diagonal')
 
     def peg_count(self):
@@ -160,7 +152,7 @@ class Board(SearchProblem):
         new_board = Board.board_from_board(self)
 
         # Calculate the coordinates of the pixel that is between the source and destination
-        hop = tuple(np.divide(np.add(source, destination), (2, 2)))
+        hop = tuple(np.divide(np.add(source, destination), (2, 2)).astype(np.uint8))
 
         new_board.board[source] = Spot.FREE
         new_board.board[destination] = Spot.PEG
@@ -192,6 +184,8 @@ class Board(SearchProblem):
         for direction in self.directions:
             if self.check_peg(empty_coord, direction) and self.check_peg(empty_coord, direction * 2):
                 yield self._adjusts_coords_to_direction(empty_coord, direction * 2)
+            elif self.check_peg(empty_coord, direction * 2) and self.check_peg(empty_coord, direction * 4):
+                yield self._adjusts_coords_to_direction(empty_coord, direction * 4)
 
     def _free_positions(self):
         """
@@ -215,6 +209,9 @@ class Board(SearchProblem):
             return Spot.OUT_OF_BOUNDS
 
         return self.board[r, c]
+
+    def state_representation(self, state):
+        return str(Board.board_from_state(state))
 
     def _out_of_bounds(self, r, c):
         """
